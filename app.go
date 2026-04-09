@@ -72,30 +72,45 @@ func (a *App) toggleWindow() {
 	defer a.mu.Unlock()
 
 	if a.isVisible {
-		// 隠すときは最小化してから隠す
-		wailsRuntime.WindowMinimise(a.ctx)
-		wailsRuntime.WindowHide(a.ctx)
-		a.isVisible = false
+		a.hideWindow()
 	} else {
-		// 初回起動時など、最小化状態でない場合でも確実に「最小化からの復帰」アクションを
-		// Windowsに認識させるため、表示する直前に一瞬だけ最小化状態を明示的に作る
-		wailsRuntime.WindowMinimise(a.ctx)
-		
-		// 表示するときは表示してから「最小化解除」を呼ぶと、Windowsが強制的にアクティブにする
-		wailsRuntime.WindowShow(a.ctx)
-		wailsRuntime.WindowUnminimise(a.ctx)
-		
-		// Send the show event for frontend to reset its state
-		wailsRuntime.EventsEmit(a.ctx, "show-launcher")
-		
-		// Focus the input
-		wailsRuntime.WindowExecJS(a.ctx, `setTimeout(() => { 
+		a.showWindow()
+	}
+}
+
+func (a *App) hideWindow() {
+	// 隠すときは最小化してから隠す
+	wailsRuntime.WindowMinimise(a.ctx)
+	wailsRuntime.WindowHide(a.ctx)
+	a.isVisible = false
+}
+
+func (a *App) showWindow() {
+	// 初回起動時など、最小化状態でない場合でも確実に「最小化からの復帰」アクションを
+	// Windowsに認識させるため、表示する直前に一瞬だけ最小化状態を明示的に作る
+	wailsRuntime.WindowMinimise(a.ctx)
+
+	// 表示するときは表示してから「最小化解除」を呼ぶと、Windowsが強制的にアクティブにする
+	wailsRuntime.WindowShow(a.ctx)
+	wailsRuntime.WindowUnminimise(a.ctx)
+
+	// Send the show event for frontend to reset its state
+	wailsRuntime.EventsEmit(a.ctx, "show-launcher")
+
+	// Focus the input
+	wailsRuntime.WindowExecJS(a.ctx, `setTimeout(() => { 
 			let el = document.querySelector('.search') || document.querySelector('.args-input'); 
 			if(el) el.focus(); 
 		}, 50);`)
-		
-		a.isVisible = true
-	}
+
+	a.isVisible = true
+}
+
+// HideWindow is called from frontend to hide the window
+func (a *App) HideWindow() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.hideWindow()
 }
 
 // loadChromeBookmarks reads the Chrome bookmarks JSON file

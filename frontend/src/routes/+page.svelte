@@ -5,7 +5,11 @@
     startDragging: async () => {},
     listen: async () => {},
     onResized: async () => {},
-    hide: async () => {}
+    hide: async () => {
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.HideWindow) {
+        await window.go.main.App.HideWindow();
+      }
+    }
   });
   class LogicalSize { constructor(w, h) { this.width = w; this.height = h; } }
   const listen = async (eventName, callback) => {

@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function Greet(arg1:string):Promise<string>;
 
+export function HideWindow():Promise<void>;
+
 export function LaunchItem(arg1:Record<string, any>,arg2:Array<string>):Promise<void>;
 
 export function SearchItems(arg1:string,arg2:string,arg3:string):Promise<Array<main.Item>>;
