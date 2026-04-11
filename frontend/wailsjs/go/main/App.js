@@ -17,3 +17,7 @@ export function LaunchItem(arg1, arg2) {
 export function SearchItems(arg1, arg2, arg3) {
   return window['go']['main']['App']['SearchItems'](arg1, arg2, arg3);
 }
+
+export function SetWindowSize(arg1, arg2) {
+  return window['go']['main']['App']['SetWindowSize'](arg1, arg2);
+}

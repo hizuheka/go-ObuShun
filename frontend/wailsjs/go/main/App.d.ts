@@ -9,3 +9,5 @@ export function HideWindow():Promise<void>;
 export function LaunchItem(arg1:Record<string, any>,arg2:Array<string>):Promise<void>;
 
 export function SearchItems(arg1:string,arg2:string,arg3:string):Promise<Array<main.Item>>;
+
+export function SetWindowSize(arg1:number,arg2:number):Promise<void>;

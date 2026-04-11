@@ -11,10 +11,57 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
+	"unsafe"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.design/x/hotkey"
 )
+
+var (
+	user32                       = syscall.NewLazyDLL("user32.dll")
+	shcore                       = syscall.NewLazyDLL("shcore.dll")
+	procGetCursorPos             = user32.NewProc("GetCursorPos")
+	procMonitorFromPoint         = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfo           = user32.NewProc("GetMonitorInfoW")
+	procGetScaleFactorForMonitor = shcore.NewProc("GetScaleFactorForMonitor")
+	procFindWindow               = user32.NewProc("FindWindowW")
+	procGetWindowRect            = user32.NewProc("GetWindowRect")
+	procSetWindowPos             = user32.NewProc("SetWindowPos")
+)
+
+type point struct {
+	x, y int32
+}
+
+type rect struct {
+	left, top, right, bottom int32
+}
+
+type monitorInfo struct {
+	size    uint32
+	monitor rect
+	work    rect
+	flags   uint32
+}
+
+type targetMonitor struct {
+	hMonitor uintptr
+	work     rect
+}
+
+const (
+	monitorDefaultToNearest = 0x00000002
+)
+
+func getMonitorScale(hMonitor uintptr) float64 {
+	var scale uint32
+	ret, _, _ := procGetScaleFactorForMonitor.Call(hMonitor, uintptr(unsafe.Pointer(&scale)))
+	if ret != 0 || scale == 0 {
+		return 1.0
+	}
+	return float64(scale) / 100.0
+}
 
 // Item represents a search result item matching the Svelte frontend expectations
 type Item struct {
@@ -32,27 +79,25 @@ type App struct {
 	isVisible bool
 	mu        sync.Mutex
 	bookmarks []Item
+	monitor   string
 }
 
 // NewApp creates a new App application struct
 func NewApp() *App {
 	return &App{
 		isVisible: false,
+		monitor:   "cursor",
 	}
 }
 
-// startup is called when the app starts. The context is saved
-// so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
 	go a.listenForHotkeys()
-	// 初期起動時にブックマークを読み込んでおく
 	a.loadChromeBookmarks()
 }
 
-// listenForHotkeys registers a global hotkey and waits for keydown events
 func (a *App) listenForHotkeys() {
-	// Register Alt + Space
 	hk := hotkey.New([]hotkey.Modifier{hotkey.ModAlt}, hotkey.KeySpace)
 	if err := hk.Register(); err != nil {
 		log.Printf("Failed to register hotkey: %v\n", err)
@@ -66,7 +111,6 @@ func (a *App) listenForHotkeys() {
 	}
 }
 
-// toggleWindow handles the show/hide logic
 func (a *App) toggleWindow() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -79,25 +123,23 @@ func (a *App) toggleWindow() {
 }
 
 func (a *App) hideWindow() {
-	// 隠すときは最小化してから隠す
-	wailsRuntime.WindowMinimise(a.ctx)
+	// 単純に隠すだけにする（ここで最小化すると2回目以降に画面外に消えるバグが起きるため）
 	wailsRuntime.WindowHide(a.ctx)
 	a.isVisible = false
 }
 
 func (a *App) showWindow() {
-	// 初回起動時など、最小化状態でない場合でも確実に「最小化からの復帰」アクションを
-	// Windowsに認識させるため、表示する直前に一瞬だけ最小化状態を明示的に作る
-	wailsRuntime.WindowMinimise(a.ctx)
+	// 1. 位置を計算して移動させる
+	a.positionWindowNative()
 
-	// 表示するときは表示してから「最小化解除」を呼ぶと、Windowsが強制的にアクティブにする
+	// 2. 以前フォーカス問題を完全に解決した「最小化・最小化解除」ハックを復活させる
 	wailsRuntime.WindowShow(a.ctx)
+	wailsRuntime.WindowMinimise(a.ctx)
 	wailsRuntime.WindowUnminimise(a.ctx)
 
-	// Send the show event for frontend to reset its state
+	// 3. フロントエンド通知
 	wailsRuntime.EventsEmit(a.ctx, "show-launcher")
 
-	// Focus the input
 	wailsRuntime.WindowExecJS(a.ctx, `setTimeout(() => { 
 			let el = document.querySelector('.search') || document.querySelector('.args-input'); 
 			if(el) el.focus(); 
@@ -106,21 +148,78 @@ func (a *App) showWindow() {
 	a.isVisible = true
 }
 
-// HideWindow is called from frontend to hide the window
+func (a *App) positionWindowNative() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	// 1. Wailsのウィンドウハンドル(HWND)をタイトルから取得
+	titlePtr, err := syscall.UTF16PtrFromString("go-obushun")
+	if err != nil {
+		return
+	}
+	hwnd, _, _ := procFindWindow.Call(0, uintptr(unsafe.Pointer(titlePtr)))
+	if hwnd == 0 {
+		return
+	}
+
+	// 2. 現在のマウスカーソルの物理座標を取得
+	var pt point
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+
+	// 3. カーソルがあるモニターの物理座標（WorkArea）を取得
+	packedPt := uintptr(uint32(pt.x)) | uintptr(uint32(pt.y))<<32
+	hMonitor, _, _ := procMonitorFromPoint.Call(packedPt, monitorDefaultToNearest)
+	if hMonitor == 0 {
+		return
+	}
+
+	var mi monitorInfo
+	mi.size = uint32(unsafe.Sizeof(mi))
+	ret, _, _ := procGetMonitorInfo.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
+	if ret == 0 {
+		return
+	}
+
+	// 4. ウィンドウの現在の論理サイズを取得
+	logicalW, _ := wailsRuntime.WindowGetSize(a.ctx)
+	if logicalW > 800 || logicalW < 100 {
+		logicalW = 620
+	}
+
+	// 5. ターゲットモニターのスケールを取得し、移動後の物理的なウィンドウ幅を予測する
+	scale := getMonitorScale(hMonitor)
+	futurePhysicalW := int32(float64(logicalW) * scale)
+
+	// 6. ターゲットモニターの物理的な幅と高さ
+	monW := mi.work.right - mi.work.left
+	monH := mi.work.bottom - mi.work.top
+
+	// 7. 物理座標でのターゲット位置（中央・上から20%）を計算
+	targetX := mi.work.left + (monW-futurePhysicalW)/2
+	targetY := mi.work.top + int32(float64(monH)*0.2)
+
+	// 8. ネイティブAPIで移動 (SWP_NOSIZE=0x0001, SWP_NOZORDER=0x0004)
+	procSetWindowPos.Call(hwnd, 0, uintptr(targetX), uintptr(targetY), 0, 0, 0x0001|0x0004)
+}
+
 func (a *App) HideWindow() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.hideWindow()
 }
 
-// loadChromeBookmarks reads the Chrome bookmarks JSON file
+func (a *App) SetWindowSize(w int, h int) {
+	wailsRuntime.WindowSetSize(a.ctx, w, h)
+}
+
 func (a *App) loadChromeBookmarks() {
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
 		return
 	}
 	bookmarkPath := filepath.Join(localAppData, "Google", "Chrome", "User Data", "Default", "Bookmarks")
-	
+
 	data, err := os.ReadFile(bookmarkPath)
 	if err != nil {
 		log.Printf("Failed to read bookmarks: %v\n", err)
@@ -134,7 +233,7 @@ func (a *App) loadChromeBookmarks() {
 	}
 
 	var parsedBookmarks []Item
-	
+
 	var parseNode func(node map[string]interface{})
 	parseNode = func(node map[string]interface{}) {
 		if node["type"] == "url" {
@@ -174,7 +273,6 @@ func (a *App) loadChromeBookmarks() {
 	a.mu.Unlock()
 }
 
-// SearchItems is called from Svelte to search items
 func (a *App) SearchItems(query string, searchMode string, sortOrder string) []Item {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -186,7 +284,7 @@ func (a *App) SearchItems(query string, searchMode string, sortOrder string) []I
 		if query == "" || strings.Contains(strings.ToLower(b.Name), queryLower) || strings.Contains(strings.ToLower(b.Path), queryLower) {
 			results = append(results, b)
 		}
-		if len(results) >= 50 { // 結果を50件までに制限して軽くする
+		if len(results) >= 50 {
 			break
 		}
 	}
@@ -194,14 +292,12 @@ func (a *App) SearchItems(query string, searchMode string, sortOrder string) []I
 	return results
 }
 
-// LaunchItem is called from Svelte when an item is selected
 func (a *App) LaunchItem(item map[string]interface{}, extraArgs []string) error {
 	path, ok := item["path"].(string)
 	if !ok || path == "" {
 		return fmt.Errorf("invalid path")
 	}
 
-	// 選択されたアイテムがブックマークやURLの場合、デフォルトブラウザで開く
 	var err error
 	switch runtime.GOOS {
 	case "windows":
@@ -217,15 +313,12 @@ func (a *App) LaunchItem(item map[string]interface{}, extraArgs []string) error 
 		return err
 	}
 
-	// アプリを非表示にする
 	a.isVisible = false
 	wailsRuntime.WindowHide(a.ctx)
 
 	return nil
 }
 
-// Greet returns a greeting for the given name
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
-

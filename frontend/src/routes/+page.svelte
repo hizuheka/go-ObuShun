@@ -1,7 +1,11 @@
 <script>
   // Mock Tauri APIs for Wails transition
   const getCurrentWindow = () => ({
-    setSize: async () => {},
+    setSize: async (size) => {
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.SetWindowSize) {
+        await window.go.main.App.SetWindowSize(size.width, size.height);
+      }
+    },
     startDragging: async () => {},
     listen: async () => {},
     onResized: async () => {},
