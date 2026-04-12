@@ -322,3 +322,22 @@ func (a *App) LaunchItem(item map[string]interface{}, extraArgs []string) error 
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
+
+// GetConfigAndWarnings returns the application configuration and any warnings
+func (a *App) GetConfigAndWarnings() (map[string]interface{}, [][]string) {
+	// 将来的には config.toml から読み込むが、現在はデフォルト値を返す
+	config := map[string]interface{}{
+		"window_width": 620,
+		"max_items":    8,
+		"theme": map[string]interface{}{
+			"preset": "catppuccin-mocha",
+		},
+	}
+	warnings := [][]string{}
+	return config, warnings
+}
+
+// ListConfigFiles returns a list of available configuration files
+func (a *App) ListConfigFiles() []string {
+	return []string{"config.toml"}
+}

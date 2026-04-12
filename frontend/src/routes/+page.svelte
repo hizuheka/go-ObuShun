@@ -33,8 +33,19 @@
   };
   const invoke = async (cmd, args) => {
     console.log("Mock invoke:", cmd, args);
-    if (cmd === "get_config_and_warnings") return { config: {}, warnings: [] };
-    if (cmd === "list_config_files") return [];
+    if (cmd === "get_config_and_warnings") {
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.GetConfigAndWarnings) {
+        const [config, warnings] = await window.go.main.App.GetConfigAndWarnings();
+        return { config, warnings };
+      }
+      return { config: {}, warnings: [] };
+    }
+    if (cmd === "list_config_files") {
+      if (window.go && window.go.main && window.go.main.App && window.go.main.App.ListConfigFiles) {
+        return await window.go.main.App.ListConfigFiles();
+      }
+      return ["config.toml"];
+    }
     
     // Call the actual Go backend for search
     if (cmd === "search_items") {
@@ -213,13 +224,20 @@
 
 
   function _setSize(w, h) {
-    const totalW = previewVisible ? w + PREVIEW_WIDTH : w;
+    // 端末によって幅が極端に小さくなる不具合を防ぐため、最小幅を保証する
+    const baseW = Math.max(w || 0, WINDOW_WIDTH || 620);
+    const totalW = previewVisible ? baseW + PREVIEW_WIDTH : baseW;
+    
     // プレビュー表示中は高さを max に固定（候補数に関わらずパネルの高さを一定に保つ）
     const maxH = INPUT_HEIGHT + BORDER_HEIGHT + MAX_ITEMS * ITEM_HEIGHT + RESULTS_PADDING;
     const totalH = previewVisible ? maxH : h;
+    
     if (_lastSize.w === totalW && _lastSize.h === totalH) return;
     _lastSize = { w: totalW, h: totalH };
-    currentWidth = w; // プレビュー幅を含まないランチャー幅を記録
+    
+    // 現在の論理幅を保存 (次回のリサイズ計算のベースにする)
+    currentWidth = baseW;
+    
     win.setSize(new LogicalSize(totalW, totalH));
   }
 
