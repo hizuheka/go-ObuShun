@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -76,6 +77,7 @@ type Item struct {
 // App struct
 type App struct {
 	ctx       context.Context
+	ctxMu     sync.Mutex
 	isVisible bool
 	mu        sync.Mutex
 	bookmarks []Item
@@ -91,7 +93,9 @@ func NewApp() *App {
 }
 
 func (a *App) startup(ctx context.Context) {
+	a.ctxMu.Lock()
 	a.ctx = ctx
+	a.ctxMu.Unlock()
 
 	go a.listenForHotkeys()
 	a.loadChromeBookmarks()
@@ -129,21 +133,35 @@ func (a *App) hideWindow() {
 }
 
 func (a *App) showWindow() {
-	// 1. 位置を計算して移動させる
+	// 1. まず位置を計算して移動させる（非表示のまま移動）
 	a.positionWindowNative()
 
-	// 2. 以前フォーカス問題を完全に解決した「最小化・最小化解除」ハックを復活させる
-	wailsRuntime.WindowShow(a.ctx)
-	wailsRuntime.WindowMinimise(a.ctx)
-	wailsRuntime.WindowUnminimise(a.ctx)
-
-	// 3. フロントエンド通知
+	// 2. フロントエンドに表示直前であることを通知
+	// これにより、フロントエンド側でクエリのクリアやリサイズ準備を行わせる
 	wailsRuntime.EventsEmit(a.ctx, "show-launcher")
 
-	wailsRuntime.WindowExecJS(a.ctx, `setTimeout(() => { 
+	// 3. わずかに待機してWebViewの再描画を待つ（重要: レースコンディション対策）
+	// WindowsのDWMがウィンドウ位置を認識し、SvelteがDOMを更新する時間を稼ぐ
+	go func() {
+		// 50ms程度の待機が、表示の安定性に劇的に寄与します
+		syncWait := 50 * time.Millisecond
+		time.Sleep(syncWait)
+
+		a.ctxMu.Lock()
+		ctx := a.ctx
+		a.ctxMu.Unlock()
+
+		// 4. ウィンドウを表示し、最小化解除ハックでフォーカスを強制する
+		wailsRuntime.WindowShow(ctx)
+		wailsRuntime.WindowMinimise(ctx)
+		wailsRuntime.WindowUnminimise(ctx)
+
+		// 5. フォーカスのバックアップ（JS側でもフォーカス）
+		wailsRuntime.WindowExecJS(ctx, `setTimeout(() => { 
 			let el = document.querySelector('.search') || document.querySelector('.args-input'); 
 			if(el) el.focus(); 
-		}, 50);`)
+		}, 10);`)
+	}()
 
 	a.isVisible = true
 }
