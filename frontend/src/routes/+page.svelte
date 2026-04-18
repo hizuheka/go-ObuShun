@@ -1,71 +1,5 @@
 <script>
-  // Mock Tauri APIs for Wails transition
-  const getCurrentWindow = () => ({
-    setSize: async (size) => {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.SetWindowSize) {
-        await window.go.main.App.SetWindowSize(size.width, size.height);
-      }
-    },
-    startDragging: async () => {},
-    listen: async () => {},
-    onResized: async () => {},
-    hide: async () => {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.HideWindow) {
-        await window.go.main.App.HideWindow();
-      }
-    }
-  });
-  class LogicalSize { constructor(w, h) { this.width = w; this.height = h; } }
-  const listen = async (eventName, callback) => {
-    try {
-      if (window.runtime && window.runtime.EventsOn) {
-        window.runtime.EventsOn(eventName, (...args) => {
-          console.log(`Received event: ${eventName}`, args);
-          callback({ payload: args.length > 0 ? args[0] : null });
-        });
-      } else {
-        // Fallback or retry? Wait until Wails is injected
-        setTimeout(() => listen(eventName, callback), 100);
-      }
-    } catch (e) {
-      console.warn("Failed to register listen:", eventName, e);
-    }
-  };
-  const invoke = async (cmd, args) => {
-    console.log("Mock invoke:", cmd, args);
-    if (cmd === "get_config_and_warnings") {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.GetConfigAndWarnings) {
-        const [config, warnings] = await window.go.main.App.GetConfigAndWarnings();
-        return { config, warnings };
-      }
-      return { config: {}, warnings: [] };
-    }
-    if (cmd === "list_config_files") {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.ListConfigFiles) {
-        return await window.go.main.App.ListConfigFiles();
-      }
-      return ["config.toml"];
-    }
-    
-    // Call the actual Go backend for search
-    if (cmd === "search_items") {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.SearchItems) {
-        return await window.go.main.App.SearchItems(args.query || "", args.searchMode || "", args.sortOrder || "");
-      }
-      return [];
-    }
-
-    // Call the actual Go backend for launch
-    if (cmd === "launch_item") {
-      if (window.go && window.go.main && window.go.main.App && window.go.main.App.LaunchItem) {
-        return await window.go.main.App.LaunchItem(args.item, args.extraArgs || []);
-      }
-      return null;
-    }
-
-    if (cmd === "complete_path") return { completionList: [], completionCommand: null, workdir: null };
-    return null;
-  };
+  import { invoke, listen, getCurrentWindow, LogicalSize } from "$lib/wails-adapter.js";
   const getVersion = async () => "1.0.0-wails";
   const debug = console.debug;
   const info = console.info;
@@ -379,18 +313,9 @@
     uiSortOrder = SORT_ORDERS[(SORT_ORDERS.indexOf(uiSortOrder) + 1) % SORT_ORDERS.length];
   }
 
-  // ユーザーの手動リサイズを追跡（プレビュー幅は除く）
-  // $state/$effect 不可: currentWidth を $state にすると resizeForSearch 内で読まれ reactive loop になる
-  const _handleResize = () => {
-    currentWidth = previewVisible ? window.innerWidth - PREVIEW_WIDTH : window.innerWidth;
-  };
-  onDestroy(() => window.removeEventListener("resize", _handleResize));
-
   onMount(async () => {
     await applyConfig({ resetModes: true });
     appVersion = await getVersion();
-
-    window.addEventListener("resize", _handleResize);
 
     await listen("update-available", (event) => {
       updateVersion = event.payload;
@@ -441,6 +366,8 @@
       // 設定を再読み込み（keybindings, font_size, theme 等を config.toml 変更後に即反映）
       await applyConfig();
       // 表示時に必ずサイズを正しく戻す（WebView2 の描画キャッシュ対策）
+      // WINDOW_WIDTH (620) をベースに強制リセット
+      currentWidth = WINDOW_WIDTH;
       resizeForSearch(filtered.length || MAX_ITEMS);
       setTimeout(() => inputEl?.focus(), 30);
     });

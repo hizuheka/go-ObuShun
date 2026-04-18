@@ -133,17 +133,15 @@ func (a *App) hideWindow() {
 }
 
 func (a *App) showWindow() {
-	// 1. まず位置を計算して移動させる（非表示のまま移動）
+	// 0. Go側から強制的にサイズをセット（フロントエンドからのリサイズを待たずに位置計算の基準を確定させる）
+	// これにより、高DPI環境での「細長くなる」「右にずれる」問題を解消します
+	wailsRuntime.WindowSetSize(a.ctx, 620, 52+16+8) // 最小構成の高さ (INPUT_HEIGHT相当)
+
+	// 1. まず位置を計算して移動させる（既知のサイズ 620px をベースに計算）
 	a.positionWindowNative()
 
-	// 2. フロントエンドに表示直前であることを通知
-	// これにより、フロントエンド側でクエリのクリアやリサイズ準備を行わせる
-	wailsRuntime.EventsEmit(a.ctx, "show-launcher")
-
-	// 3. わずかに待機してWebViewの再描画を待つ（重要: レースコンディション対策）
-	// WindowsのDWMがウィンドウ位置を認識し、SvelteがDOMを更新する時間を稼ぐ
+	// 2. わずかに待機してWebViewの再描画を待つ
 	go func() {
-		// 50ms程度の待機が、表示の安定性に劇的に寄与します
 		syncWait := 50 * time.Millisecond
 		time.Sleep(syncWait)
 
@@ -151,12 +149,15 @@ func (a *App) showWindow() {
 		ctx := a.ctx
 		a.ctxMu.Unlock()
 
-		// 4. ウィンドウを表示し、最小化解除ハックでフォーカスを強制する
+		// 3. ウィンドウを表示し、最小化解除ハックでフォーカスを強制する
 		wailsRuntime.WindowShow(ctx)
 		wailsRuntime.WindowMinimise(ctx)
 		wailsRuntime.WindowUnminimise(ctx)
 
-		// 5. フォーカスのバックアップ（JS側でもフォーカス）
+		// 4. ウィンドウが確実に表示・復帰した後にフロントエンドへ通知
+		wailsRuntime.EventsEmit(ctx, "show-launcher")
+
+		// 5. フォーカスのバックアップ
 		wailsRuntime.WindowExecJS(ctx, `setTimeout(() => { 
 			let el = document.querySelector('.search') || document.querySelector('.args-input'); 
 			if(el) el.focus(); 
