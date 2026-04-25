@@ -133,11 +133,11 @@ func (a *App) hideWindow() {
 }
 
 func (a *App) showWindow() {
-	// 0. Go側から強制的にサイズをセット（フロントエンドからのリサイズを待たずに位置計算の基準を確定させる）
-	// これにより、高DPI環境での「細長くなる」「右にずれる」問題を解消します
-	wailsRuntime.WindowSetSize(a.ctx, 620, 52+16+8) // 最小構成の高さ (INPUT_HEIGHT相当)
+	// 0. Go側から強制的にサイズをセット（基準幅 620px、高さはリスト8件分を含む 400px をデフォルトとする）
+	// これにより、JavaScript側のリサイズを待たずに、最初から正しいサイズ感で表示を開始できます
+	wailsRuntime.WindowSetSize(a.ctx, 620, 400) 
 
-	// 1. まず位置を計算して移動させる（既知のサイズ 620px をベースに計算）
+	// 1. まず位置を計算して移動させる
 	a.positionWindowNative()
 
 	// 2. わずかに待機してWebViewの再描画を待つ
