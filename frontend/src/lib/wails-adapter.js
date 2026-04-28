@@ -85,6 +85,12 @@ export const invoke = async (cmd, args) => {
       }
       return null;
 
+    case "exit_app":
+      if (app.ExitApp) {
+        return await app.ExitApp();
+      }
+      return null;
+
     case "complete_path":
       // Currently partially implemented in Go if needed, or return empty for now
       return { completions: [], prefix: "" };

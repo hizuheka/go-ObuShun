@@ -338,6 +338,11 @@ func (a *App) LaunchItem(item map[string]interface{}, extraArgs []string) error 
 	return nil
 }
 
+// ExitApp is called from frontend to terminate the application
+func (a *App) ExitApp() {
+	wailsRuntime.Quit(a.ctx)
+}
+
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
