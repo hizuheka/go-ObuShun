@@ -33,6 +33,16 @@ export class LogicalSize {
   }
 }
 
+export const getVersion = async () => {
+  for (let i = 0; i < 10; i++) {
+    if (isWailsReady() && window.go.main.App.GetVersion) {
+      return await window.go.main.App.GetVersion();
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
+  return "0.0.8";
+};
+
 export const listen = async (eventName, callback) => {
   try {
     if (window.runtime && window.runtime.EventsOn) {
@@ -53,19 +63,18 @@ export const invoke = async (cmd, args) => {
   console.log("Invoke:", cmd, args);
   
   // Wait for Wails to be ready for critical commands
-  if (!isWailsReady()) {
-    // For search/config, wait a bit
+  for (let i = 0; i < 10; i++) {
+    if (isWailsReady()) break;
     await new Promise(resolve => setTimeout(resolve, 50));
-    if (!isWailsReady()) return null;
   }
 
-  const app = window.go.main.App;
+  const app = isWailsReady() ? window.go.main.App : {};
 
   switch (cmd) {
     case "get_config_and_warnings":
       if (app.GetConfigAndWarnings) {
-        const [config, warnings] = await app.GetConfigAndWarnings();
-        return { config, warnings };
+        const res = await app.GetConfigAndWarnings();
+        return { config: res.config || {}, warnings: res.warnings || [] };
       }
       return { config: {}, warnings: [] };
 

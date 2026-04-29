@@ -343,12 +343,22 @@ func (a *App) ExitApp() {
 	wailsRuntime.Quit(a.ctx)
 }
 
+// GetVersion returns the application version
+func (a *App) GetVersion() string {
+	return "0.0.8" // TODO: Update automatically or via ldflags during build
+}
+
 func (a *App) Greet(name string) string {
 	return fmt.Sprintf("Hello %s, It's show time!", name)
 }
 
+type ConfigResponse struct {
+	Config   map[string]interface{} `json:"config"`
+	Warnings [][]string             `json:"warnings"`
+}
+
 // GetConfigAndWarnings returns the application configuration and any warnings
-func (a *App) GetConfigAndWarnings() (map[string]interface{}, [][]string) {
+func (a *App) GetConfigAndWarnings() ConfigResponse {
 	// 将来的には config.toml から読み込むが、現在はデフォルト値を返す
 	config := map[string]interface{}{
 		"window_width": 620,
@@ -358,7 +368,7 @@ func (a *App) GetConfigAndWarnings() (map[string]interface{}, [][]string) {
 		},
 	}
 	warnings := [][]string{}
-	return config, warnings
+	return ConfigResponse{Config: config, Warnings: warnings}
 }
 
 // ListConfigFiles returns a list of available configuration files

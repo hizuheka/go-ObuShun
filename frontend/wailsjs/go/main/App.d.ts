@@ -4,7 +4,9 @@ import {main} from '../models';
 
 export function ExitApp():Promise<void>;
 
-export function GetConfigAndWarnings():Promise<Record<string, any>|Array<any>>;
+export function GetConfigAndWarnings():Promise<main.ConfigResponse>;
+
+export function GetVersion():Promise<string>;
 
 export function Greet(arg1:string):Promise<string>;
 

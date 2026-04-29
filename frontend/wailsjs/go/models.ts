@@ -1,5 +1,19 @@
 export namespace main {
 	
+	export class ConfigResponse {
+	    config: Record<string, any>;
+	    warnings: string[][];
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigResponse(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.config = source["config"];
+	        this.warnings = source["warnings"];
+	    }
+	}
 	export class Item {
 	    name: string;
 	    path: string;

@@ -10,6 +10,10 @@ export function GetConfigAndWarnings() {
   return window['go']['main']['App']['GetConfigAndWarnings']();
 }
 
+export function GetVersion() {
+  return window['go']['main']['App']['GetVersion']();
+}
+
 export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }

@@ -1,6 +1,5 @@
 <script>
-  import { invoke, listen, getCurrentWindow, LogicalSize } from "$lib/wails-adapter.js";
-  const getVersion = async () => "1.0.0-wails";
+  import { invoke, listen, getCurrentWindow, LogicalSize, getVersion } from "$lib/wails-adapter.js";
   const debug = console.debug;
   const info = console.info;
   import { onMount, onDestroy, tick } from "svelte";
