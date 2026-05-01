@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +98,16 @@ func (a *App) startup(ctx context.Context) {
 	a.ctxMu.Lock()
 	a.ctx = ctx
 	a.ctxMu.Unlock()
+
+	go func() {
+		exe, err := os.Executable()
+		if err == nil {
+			oldExe := exe + ".old"
+			if _, err := os.Stat(oldExe); err == nil {
+				os.Remove(oldExe)
+			}
+		}
+	}()
 
 	go a.listenForHotkeys()
 	a.loadChromeBookmarks()
@@ -345,7 +357,147 @@ func (a *App) ExitApp() {
 
 // GetVersion returns the application version
 func (a *App) GetVersion() string {
-	return "0.0.8" // TODO: Update automatically or via ldflags during build
+	return "0.0.9" // TODO: Update automatically or via ldflags during build
+}
+
+// InstallUpdate checks for updates from GitHub Releases and installs if available
+func (a *App) InstallUpdate() error {
+	repo := "hizuheka/go-ObuShun" // 正しいリポジトリ名
+
+	wailsRuntime.EventsEmit(a.ctx, "update-log", map[string]interface{}{"line": "checking for updates..."})
+
+	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo))
+	if err != nil {
+		return fmt.Errorf("failed to fetch release info: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("no releases found on github")
+	} else if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github api returned status %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Size               int64  `json:"size"`
+		} `json:"assets"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return fmt.Errorf("failed to parse release info: %v", err)
+	}
+
+	currentVersion := "v" + a.GetVersion()
+	if release.TagName == currentVersion {
+		wailsRuntime.EventsEmit(a.ctx, "update-log", map[string]interface{}{"line": "already up to date"})
+		return nil // 最新版
+	}
+
+	wailsRuntime.EventsEmit(a.ctx, "update-available", release.TagName)
+	wailsRuntime.EventsEmit(a.ctx, "update-log", map[string]interface{}{"line": fmt.Sprintf("found %s, starting download...", release.TagName)})
+
+	// 該当OS向けのアセットを探す（ここでは go-ObuShun.exe を想定）
+	var downloadURL string
+	var totalSize int64
+	for _, asset := range release.Assets {
+		if strings.HasSuffix(asset.Name, ".exe") {
+			downloadURL = asset.BrowserDownloadURL
+			totalSize = asset.Size
+			break
+		}
+	}
+
+	if downloadURL == "" {
+		return fmt.Errorf("no windows executable found in release %s", release.TagName)
+	}
+
+	// ダウンロード実行
+	return a.downloadAndApplyUpdate(downloadURL, totalSize)
+}
+
+func (a *App) downloadAndApplyUpdate(url string, totalSize int64) error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+
+	updatePath := exePath + ".update"
+	oldPath := exePath + ".old"
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download update: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+
+	out, err := os.OpenFile(updatePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create update file: %v", err)
+	}
+
+	// プログレスバー用にカスタムReaderを用意
+	buf := make([]byte, 32*1024)
+	var downloaded int64
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			out.Write(buf[:n])
+			downloaded += int64(n)
+			wailsRuntime.EventsEmit(a.ctx, "update-progress", map[string]interface{}{
+				"downloaded": downloaded,
+				"total":      totalSize,
+			})
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			out.Close()
+			os.Remove(updatePath)
+			return fmt.Errorf("error reading download stream: %v", err)
+		}
+	}
+	out.Close()
+
+	wailsRuntime.EventsEmit(a.ctx, "update-log", map[string]interface{}{"line": "download complete, replacing executable..."})
+
+	// 古いファイルがあれば念のため削除（前回起動時に消えなかった場合）
+	os.Remove(oldPath)
+
+	// 現在実行中のファイルを .old にリネーム（Windowsでは実行中のファイルを直接上書き削除できないため）
+	if err := os.Rename(exePath, oldPath); err != nil {
+		os.Remove(updatePath)
+		return fmt.Errorf("failed to rename current executable: %v", err)
+	}
+
+	// ダウンロードしたファイルを正規のファイル名にリネーム
+	if err := os.Rename(updatePath, exePath); err != nil {
+		// ロールバックを試みる
+		os.Rename(oldPath, exePath)
+		os.Remove(updatePath)
+		return fmt.Errorf("failed to install new executable: %v", err)
+	}
+
+	wailsRuntime.EventsEmit(a.ctx, "update-log", map[string]interface{}{"line": "restarting application..."})
+
+	// 新しい実行ファイルを起動
+	cmd := exec.Command(exePath)
+	cmd.Dir = filepath.Dir(exePath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("update installed, but failed to restart: %v", err)
+	}
+
+	// 現在のプロセスを終了
+	os.Exit(0)
+	return nil
 }
 
 func (a *App) Greet(name string) string {

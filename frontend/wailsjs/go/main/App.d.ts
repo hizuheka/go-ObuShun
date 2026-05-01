@@ -12,6 +12,8 @@ export function Greet(arg1:string):Promise<string>;
 
 export function HideWindow():Promise<void>;
 
+export function InstallUpdate():Promise<void>;
+
 export function LaunchItem(arg1:Record<string, any>,arg2:Array<string>):Promise<void>;
 
 export function ListConfigFiles():Promise<Array<string>>;

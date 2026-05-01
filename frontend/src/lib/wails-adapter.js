@@ -40,7 +40,7 @@ export const getVersion = async () => {
     }
     await new Promise(r => setTimeout(r, 50));
   }
-  return "0.0.8";
+  return "0.0.9";
 };
 
 export const listen = async (eventName, callback) => {
@@ -91,6 +91,12 @@ export const invoke = async (cmd, args) => {
     case "launch_item":
       if (app.LaunchItem) {
         return await app.LaunchItem(args.item, args.extraArgs || []);
+      }
+      return null;
+
+    case "install_update":
+      if (app.InstallUpdate) {
+        return await app.InstallUpdate();
       }
       return null;
 
